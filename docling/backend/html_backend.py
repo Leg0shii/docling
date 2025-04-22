@@ -2,7 +2,9 @@ import logging
 from io import BytesIO
 from pathlib import Path
 from typing import Final, Optional, Union, cast
+from urllib.parse import urljoin, urlparse
 
+import requests
 from bs4 import BeautifulSoup, NavigableString, PageElement, Tag
 from bs4.element import PreformattedString
 from docling_core.types.doc import (
@@ -12,10 +14,13 @@ from docling_core.types.doc import (
     DocumentOrigin,
     GroupItem,
     GroupLabel,
+    ImageRef,
+    Size,
     TableCell,
     TableData,
 )
 from docling_core.types.doc.document import ContentLayer
+from PIL import Image as PILImage
 from typing_extensions import override
 
 from docling.backend.abstract_backend import DeclarativeDocumentBackend
@@ -55,6 +60,13 @@ class HTMLDocumentBackend(DeclarativeDocumentBackend):
         self.max_levels = 10
         self.level = 0
         self.parents: dict[int, Optional[Union[DocItem, GroupItem]]] = {}
+
+        # gets base url for loading the image data
+        file_str = str(in_doc.file or "").replace("\\", "/").replace(":/", "://")
+        self.base_path = (
+            file_str if file_str.startswith(("http://", "https://")) else None
+        )
+
         for i in range(self.max_levels):
             self.parents[i] = None
 
@@ -504,41 +516,56 @@ class HTMLDocumentBackend(DeclarativeDocumentBackend):
 
         return result
 
-    def handle_figure(self, element: Tag, doc: DoclingDocument) -> None:
-        """Handles image tags (img)."""
+    def handle_figure(self, el: Tag, doc: DoclingDocument) -> None:
+        self._add_picture(el, doc, True)
 
-        # Extract the image URI from the <img> tag
-        # image_uri = root.xpath('//figure//img/@src')[0]
+    def handle_image(self, el: Tag, doc: DoclingDocument) -> None:
+        self._add_picture(el, doc, False)
 
-        contains_captions = element.find(["figcaption"])
-        if not isinstance(contains_captions, Tag):
-            doc.add_picture(
+    def _add_picture(
+        self, node: Tag, doc: DoclingDocument, has_caption: bool = False
+    ) -> None:
+        img = node.find("img") if has_caption else node
+        if not isinstance(img, Tag):
+            return
+
+        src = img.get("src")
+        if not isinstance(src, str):
+            return
+
+        caption = None
+        if has_caption and (c := node.find("figcaption")):
+            caption = doc.add_text(
                 parent=self.parents[self.level],
-                caption=None,
-                content_layer=self.content_layer,
-            )
-        else:
-            texts = []
-            for item in contains_captions:
-                texts.append(item.text)
-
-            fig_caption = doc.add_text(
                 label=DocItemLabel.CAPTION,
-                text=("".join(texts)).strip(),
+                text=c.get_text(strip=True),
                 content_layer=self.content_layer,
             )
-            doc.add_picture(
-                parent=self.parents[self.level],
-                caption=fig_caption,
-                content_layer=self.content_layer,
-            )
-
-    def handle_image(self, element: Tag, doc: DoclingDocument) -> None:
-        """Handles image tags (img)."""
-        _log.debug(f"ignoring <img> tags at the moment: {element}")
 
         doc.add_picture(
             parent=self.parents[self.level],
-            caption=None,
+            caption=caption,
+            image=self._make_image_ref(src),
             content_layer=self.content_layer,
         )
+
+    def _make_image_ref(self, src: str | None, dpi: int = 300) -> Optional[ImageRef]:
+        if not src:
+            return None
+
+        # resolve relative URLs to local files
+        if self.base_path and not src.startswith(("http://", "https://", "data:")):
+            src = urljoin(self.base_path, src)
+
+        # remote or local file
+        try:
+            img = (
+                PILImage.open(BytesIO(requests.get(src, timeout=10).content))
+                if src.startswith(("http://", "https://"))
+                else PILImage.open(src)
+            )
+        except Exception as e:
+            _log.warning("Could not load image '%s': %s", src, e)
+            return None
+
+        return ImageRef.from_pil(img, dpi=dpi)

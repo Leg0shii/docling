@@ -253,11 +253,12 @@ class _DocumentConversionInput(BaseModel):
             else:
                 backend = format_options[format].backend
 
+            filename = str(item)
             if isinstance(obj, Path):
                 yield InputDocument(
                     path_or_stream=obj,
                     format=format,  # type: ignore[arg-type]
-                    filename=obj.name,
+                    filename=filename,
                     limits=self.limits,
                     backend=backend,
                 )
@@ -265,7 +266,7 @@ class _DocumentConversionInput(BaseModel):
                 yield InputDocument(
                     path_or_stream=obj.stream,
                     format=format,  # type: ignore[arg-type]
-                    filename=obj.name,
+                    filename=filename,
                     limits=self.limits,
                     backend=backend,
                 )
