@@ -8,9 +8,13 @@ from functools import partial
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Type, Union
 
-from pydantic import BaseModel, ConfigDict, model_validator, validate_call
+from numpy import isin
+from pydantic import BaseModel, ConfigDict, Field, model_validator, validate_call
 
-from docling.backend.abstract_backend import AbstractDocumentBackend
+from docling.backend.abstract_backend import (
+    AbstractDocumentBackend,
+    DeclarativeDocumentBackend,
+)
 from docling.backend.asciidoc_backend import AsciiDocBackend
 from docling.backend.csv_backend import CsvDocumentBackend
 from docling.backend.docling_parse_v4_backend import DoclingParseV4DocumentBackend
@@ -23,6 +27,7 @@ from docling.backend.msword_backend import MsWordDocumentBackend
 from docling.backend.noop_backend import NoOpBackend
 from docling.backend.xml.jats_backend import JatsDocumentBackend
 from docling.backend.xml.uspto_backend import PatentUsptoDocumentBackend
+from docling.datamodel.backend_options import BackendOptions, HTMLBackendOptions
 from docling.datamodel.base_models import (
     ConversionStatus,
     DoclingComponentType,
@@ -57,6 +62,7 @@ class FormatOption(BaseModel):
     pipeline_cls: Type[BasePipeline]
     pipeline_options: Optional[PipelineOptions] = None
     backend: Type[AbstractDocumentBackend]
+    backend_options: BackendOptions = Field(default_factory=BackendOptions)
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -64,6 +70,7 @@ class FormatOption(BaseModel):
     def set_optional_field_default(self) -> "FormatOption":
         if self.pipeline_options is None:
             self.pipeline_options = self.pipeline_cls.get_default_options()
+
         return self
 
 
