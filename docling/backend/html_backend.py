@@ -1,3 +1,4 @@
+import base64
 import logging
 import re
 import traceback
@@ -5,7 +6,9 @@ from email.mime import image
 from io import BytesIO
 from pathlib import Path
 from typing import Final, Optional, Union, cast
+from urllib.parse import urljoin
 
+import requests
 from bs4 import BeautifulSoup, NavigableString, PageElement, Tag
 from bs4.element import PreformattedString
 from docling_core.types.doc import (
@@ -15,12 +18,14 @@ from docling_core.types.doc import (
     DocumentOrigin,
     GroupItem,
     GroupLabel,
+    Size,
     TableCell,
     TableData,
     TextItem,
 )
-from docling_core.types.doc.document import ContentLayer
-from pydantic import BaseModel
+from docling_core.types.doc.document import ContentLayer, ImageRef
+from PIL import Image, UnidentifiedImageError
+from pydantic import AnyUrl, BaseModel, ValidationError
 from typing_extensions import override
 
 from docling import backend
@@ -64,7 +69,7 @@ class _Context(BaseModel):
     list_start_by_ref: dict[str, int] = {}
 
 
-class HTMLDocumentBackend(DeclarativeDocumentBackend):
+class HTMLDocumentBackend(DeclarativeDocumentBackend[HTMLBackendOptions]):
     @override
     def __init__(
         self,
@@ -75,6 +80,7 @@ class HTMLDocumentBackend(DeclarativeDocumentBackend):
         super().__init__(in_doc, path_or_stream, backend_options=backend_options)
         self.soup: Optional[Tag] = None
         self.path_or_stream = path_or_stream
+        self.base_url = in_doc.source_url or None
 
         # Initialize the parents for the hierarchy
         self.max_levels = 10
@@ -409,24 +415,113 @@ class HTMLDocumentBackend(DeclarativeDocumentBackend):
             self.level -= 1
 
     def _emit_image(self, img_tag: Tag, doc: DoclingDocument) -> None:
+        image_options = self.backend_options.image_options
+        if image_options == ImageOptions.NONE:
+            return
+
+        parent = self.parents[self.level]
+
+        # Look for caption in figcaption first, then fall back to alt
+        caption = ""
         figure = img_tag.find_parent("figure")
-        caption: str = ""
         if isinstance(figure, Tag):
             caption_tag = figure.find("figcaption", recursive=False)
             if isinstance(caption_tag, Tag):
-                caption = caption_tag.get_text()
-        if not caption:
-            caption = str(img_tag.get("alt", "")).strip()
+                caption = caption_tag.get_text(strip=True)
 
-        caption_item: Optional[TextItem] = None
+        if not caption:
+            caption = self._get_attr_as_string(img_tag, "alt").strip()
+
+        caption_item = None
         if caption:
             caption_item = doc.add_text(
-                DocItemLabel.CAPTION, text=caption, content_layer=self.content_layer
+                DocItemLabel.CAPTION,
+                caption,
+                parent=parent,
+                content_layer=self.content_layer,
             )
 
+        src_url = self._get_attr_as_string(img_tag, "src")
+        if not src_url:
+            # No source URL, just add placeholder
+            doc.add_picture(
+                caption=caption_item,
+                parent=parent,
+                content_layer=self.content_layer,
+            )
+            return
+
+        if self.base_url and not src_url.startswith(("http://", "https://", "data:")):
+            src_url = urljoin(self.base_url, src_url)
+            _log.debug(f"Resolved relative URL to: {src_url}")
+
+        width = self._get_attr_as_string(img_tag, "width", str(DEFAULT_IMAGE_WIDTH))
+        height = self._get_attr_as_string(img_tag, "height", str(DEFAULT_IMAGE_HEIGHT))
+        img_ref: Optional[ImageRef] = None
+
+        if image_options == ImageOptions.EMBEDDED:
+            try:
+                if src_url.startswith("http"):
+                    response = requests.get(src_url, stream=True)
+                    response.raise_for_status()
+                    img = Image.open(BytesIO(response.content))
+                elif src_url.startswith("data:"):
+                    data = re.sub(r"^data:image/.+;base64,", "", src_url)
+                    img = Image.open(BytesIO(base64.b64decode(data)))
+                else:
+                    _log.warning(f"Cannot process image URL: {src_url}")
+                    return
+                img_ref = ImageRef.from_pil(img, dpi=int(img.info.get("dpi", (72,))[0]))
+            except (
+                FileNotFoundError,
+                UnidentifiedImageError,
+                requests.RequestException,
+            ) as e:
+                _log.warning(f"Could not load image (src={src_url}): {e}")
+                doc.add_picture(
+                    caption=caption_item,
+                    parent=parent,
+                    content_layer=self.content_layer,
+                )
+                return
+
+        elif image_options == ImageOptions.REFERENCED:
+            try:
+                if src_url.startswith("http"):
+                    try:
+                        response = requests.get(src_url, stream=True)
+                        response.raise_for_status()
+                        img = Image.open(BytesIO(response.content))
+                        img_ref = ImageRef.from_pil(img, dpi=72)
+                        img_ref.uri = AnyUrl(src_url)
+                    except Exception as e:
+                        _log.debug(f"Could not download image for embedding: {e}")
+                        # Fallback to just storing the URL
+                        img_ref = ImageRef(
+                            uri=AnyUrl(src_url),
+                            dpi=72,
+                            mimetype="image/png",
+                            size=Size(width=float(width), height=float(height)),
+                        )
+                elif src_url.startswith("data:"):
+                    img_ref = ImageRef(
+                        uri=AnyUrl(src_url),
+                        dpi=72,
+                        mimetype="image/png",
+                        size=Size(width=float(width), height=float(height)),
+                    )
+                else:
+                    _log.warning(f"Cannot process image URL: {src_url}")
+                    return
+
+            except ValidationError as e:
+                _log.warning(f"Could not create image reference (src={src_url}): {e}")
+                return
+
         doc.add_picture(
+            image=img_ref,
             caption=caption_item,
-            parent=self.parents[self.level],
+            parent=parent,
             content_layer=self.content_layer,
         )
 
@@ -581,3 +676,11 @@ class HTMLDocumentBackend(DeclarativeDocumentBackend):
                 data.table_cells.append(table_cell)
 
         return data
+
+    @staticmethod
+    def _get_attr_as_string(tag: Tag, attr: str, default: str = "") -> str:
+        """Get attribute value as string, handling list values."""
+        value = tag.get(attr)
+        if not value:
+            return default
+        return value[0] if isinstance(value, list) else value
