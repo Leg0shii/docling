@@ -1,8 +1,12 @@
 from io import BytesIO
 from pathlib import Path
+from typing import List, Tuple
+
+from docling_core.types.doc import ImageRefMode
 
 from docling.backend.html_backend import HTMLDocumentBackend
-from docling.datamodel.backend_options import HTMLBackendOptions
+from docling.datamodel import backend_options
+from docling.datamodel.backend_options import HTMLBackendOptions, ImageOptions
 from docling.datamodel.base_models import InputFormat
 from docling.datamodel.document import (
     ConversionResult,
@@ -110,37 +114,59 @@ def get_html_paths():
     return html_files
 
 
-def get_converter() -> DocumentConverter:
-    converter = DocumentConverter(allowed_formats=[InputFormat.HTML])
+def get_converters() -> List[Tuple[ImageRefMode, DocumentConverter]]:
+    image_options = [
+        (ImageRefMode.PLACEHOLDER, ImageOptions.NONE),
+        (ImageRefMode.REFERENCED, ImageOptions.REFERENCED),
+        (ImageRefMode.EMBEDDED, ImageOptions.EMBEDDED),
+    ]
 
-    return converter
+    converters = []
+    for name, image_option in image_options:
+        converter = DocumentConverter(
+            allowed_formats=[InputFormat.HTML],
+            format_options={
+                InputFormat.HTML: HTMLFormatOption(
+                    backend_options=HTMLBackendOptions(image_options=image_option),
+                ),
+            },
+        )
+        converters.append((name, converter))
+
+    return converters
 
 
-def test_e2e_html_conversions():
+def test_e2e_html_conversions() -> None:
     html_paths = get_html_paths()
-    converter = get_converter()
+    converters = get_converters()
 
-    for html_path in html_paths:
-        # print(f"converting {html_path}")
+    for image_mode, converter in converters:
+        for html_path in html_paths:
+            mode = f"{image_mode.value}_"
+            if image_mode == ImageRefMode.PLACEHOLDER:
+                mode = ""
 
-        gt_path = (
-            html_path.parent.parent / "groundtruth" / "docling_v2" / html_path.name
-        )
+            gt_path = (
+                html_path.parent.parent
+                / "groundtruth"
+                / "docling_v2"
+                / f"{mode}{html_path.name}"
+            )
 
-        conv_result: ConversionResult = converter.convert(html_path)
+            conv_result: ConversionResult = converter.convert(html_path)
 
-        doc: DoclingDocument = conv_result.document
+            doc: DoclingDocument = conv_result.document
 
-        pred_md: str = doc.export_to_markdown()
-        assert verify_export(pred_md, str(gt_path) + ".md", generate=GENERATE), (
-            "export to md"
-        )
+            pred_md: str = doc.export_to_markdown(image_mode=image_mode)
+            assert verify_export(pred_md, str(gt_path) + ".md", generate=GENERATE), (
+                "export to md"
+            )
 
-        pred_itxt: str = doc._export_to_indented_text(
-            max_text_len=70, explicit_tables=False
-        )
-        assert verify_export(pred_itxt, str(gt_path) + ".itxt", generate=GENERATE), (
-            "export to indented-text"
-        )
+            pred_itxt: str = doc._export_to_indented_text(
+                max_text_len=70, explicit_tables=False
+            )
+            assert verify_export(
+                pred_itxt, str(gt_path) + ".itxt", generate=GENERATE
+            ), "export to indented-text"
 
-        assert verify_document(doc, str(gt_path) + ".json", GENERATE)
+            assert verify_document(doc, str(gt_path) + ".json", GENERATE)

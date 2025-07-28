@@ -81,6 +81,7 @@ class HTMLDocumentBackend(DeclarativeDocumentBackend[HTMLBackendOptions]):
         self.soup: Optional[Tag] = None
         self.path_or_stream = path_or_stream
         self.base_url = in_doc.source_url or None
+        self.base_path = in_doc.file or None
 
         # Initialize the parents for the hierarchy
         self.max_levels = 10
@@ -417,8 +418,9 @@ class HTMLDocumentBackend(DeclarativeDocumentBackend[HTMLBackendOptions]):
     def _emit_image(self, img_tag: Tag, doc: DoclingDocument) -> None:
         parent = self.parents[self.level]
 
-        figure = img_tag.find_parent("figure")
+        # Extract caption
         caption = ""
+        figure = img_tag.find_parent("figure")
         if isinstance(figure, Tag):
             caption_tag = figure.find("figcaption", recursive=False)
             if isinstance(caption_tag, Tag):
@@ -427,13 +429,15 @@ class HTMLDocumentBackend(DeclarativeDocumentBackend[HTMLBackendOptions]):
         if not caption:
             caption = self._get_attr_as_string(img_tag, "alt").strip()
 
-        caption_item = None
-        if caption:
-            caption_item = doc.add_text(
+        caption_item = (
+            doc.add_text(
                 DocItemLabel.CAPTION,
                 caption,
                 content_layer=self.content_layer,
             )
+            if caption
+            else None
+        )
 
         image_options = self.backend_options.image_options
         if image_options == ImageOptions.NONE:
@@ -446,7 +450,6 @@ class HTMLDocumentBackend(DeclarativeDocumentBackend[HTMLBackendOptions]):
 
         src_url = self._get_attr_as_string(img_tag, "src")
         if not src_url:
-            # No source URL, just add placeholder
             doc.add_picture(
                 caption=caption_item,
                 parent=parent,
@@ -454,72 +457,20 @@ class HTMLDocumentBackend(DeclarativeDocumentBackend[HTMLBackendOptions]):
             )
             return
 
-        if self.base_url and not src_url.startswith(("http://", "https://", "data:")):
-            src_url = urljoin(self.base_url, src_url)
-            _log.debug(f"Resolved relative URL to: {src_url}")
+        # Resolve relative URLs
+        if not src_url.startswith(("http://", "https://", "data:", "file://", "/")):
+            if self.base_url:
+                src_url = urljoin(self.base_url, src_url)
+            elif self.base_path:
+                # For local files, resolve relative to the HTML file location
+                src_url = str(Path(self.base_path).parent / src_url)
+        elif src_url.startswith("//"):
+            # Protocol-relative URL - default to https
+            src_url = "https:" + src_url
 
-        width = self._get_attr_as_string(img_tag, "width", str(DEFAULT_IMAGE_WIDTH))
-        height = self._get_attr_as_string(img_tag, "height", str(DEFAULT_IMAGE_HEIGHT))
-        img_ref: Optional[ImageRef] = None
+        _log.debug(f"Resolved URL to: {src_url}")
 
-        if image_options == ImageOptions.EMBEDDED:
-            try:
-                if src_url.startswith("http"):
-                    response = requests.get(src_url, stream=True)
-                    response.raise_for_status()
-                    img = Image.open(BytesIO(response.content))
-                elif src_url.startswith("data:"):
-                    data = re.sub(r"^data:image/.+;base64,", "", src_url)
-                    img = Image.open(BytesIO(base64.b64decode(data)))
-                else:
-                    _log.warning(f"Cannot process image URL: {src_url}")
-                    return
-                img_ref = ImageRef.from_pil(img, dpi=int(img.info.get("dpi", (72,))[0]))
-            except (
-                FileNotFoundError,
-                UnidentifiedImageError,
-                requests.RequestException,
-            ) as e:
-                _log.warning(f"Could not load image (src={src_url}): {e}")
-                doc.add_picture(
-                    caption=caption_item,
-                    parent=parent,
-                    content_layer=self.content_layer,
-                )
-                return
-
-        elif image_options == ImageOptions.REFERENCED:
-            try:
-                if src_url.startswith("http"):
-                    try:
-                        response = requests.get(src_url, stream=True)
-                        response.raise_for_status()
-                        img = Image.open(BytesIO(response.content))
-                        img_ref = ImageRef.from_pil(img, dpi=72)
-                        img_ref.uri = AnyUrl(src_url)
-                    except Exception as e:
-                        _log.debug(f"Could not download image for embedding: {e}")
-                        # Fallback to just storing the URL
-                        img_ref = ImageRef(
-                            uri=AnyUrl(src_url),
-                            dpi=72,
-                            mimetype="image/png",
-                            size=Size(width=float(width), height=float(height)),
-                        )
-                elif src_url.startswith("data:"):
-                    img_ref = ImageRef(
-                        uri=AnyUrl(src_url),
-                        dpi=72,
-                        mimetype="image/png",
-                        size=Size(width=float(width), height=float(height)),
-                    )
-                else:
-                    _log.warning(f"Cannot process image URL: {src_url}")
-                    return
-
-            except ValidationError as e:
-                _log.warning(f"Could not create image reference (src={src_url}): {e}")
-                return
+        img_ref = self._create_image_ref(img_tag, src_url, image_options)
 
         doc.add_picture(
             image=img_ref,
@@ -527,6 +478,63 @@ class HTMLDocumentBackend(DeclarativeDocumentBackend[HTMLBackendOptions]):
             parent=parent,
             content_layer=self.content_layer,
         )
+
+    def _create_image_ref(
+        self, img_tag: Tag, src_url: str, image_options: ImageOptions
+    ) -> Optional[ImageRef]:
+        width = self._get_attr_as_string(img_tag, "width", str(DEFAULT_IMAGE_WIDTH))
+        height = self._get_attr_as_string(img_tag, "height", str(DEFAULT_IMAGE_HEIGHT))
+
+        try:
+            img_data = self._load_image_data(src_url)
+
+            if image_options == ImageOptions.EMBEDDED and img_data:
+                img = Image.open(BytesIO(img_data))
+                return ImageRef.from_pil(img, dpi=int(img.info.get("dpi", (72,))[0]))
+
+            elif image_options == ImageOptions.REFERENCED:
+                uri: Union[AnyUrl, Path]
+                if src_url.startswith(("http://", "https://", "data:", "file://")):
+                    uri = AnyUrl(src_url)
+                else:
+                    uri = Path(src_url)
+
+                if img_data:
+                    img = Image.open(BytesIO(img_data))
+                    img_ref = ImageRef.from_pil(img, dpi=72)
+                    img_ref.uri = uri
+                    return img_ref
+                else:
+                    return ImageRef(
+                        uri=uri,
+                        dpi=72,
+                        mimetype="image/png",
+                        size=Size(width=float(width), height=float(height)),
+                    )
+
+        except (ValidationError, UnidentifiedImageError, Exception) as e:
+            _log.warning(f"Could not process image (src={src_url}): {e}")
+
+        return None
+
+    def _load_image_data(self, src_url: str) -> Optional[bytes]:
+        try:
+            if src_url.startswith(("http://", "https://")):
+                response = requests.get(src_url, stream=True)
+                response.raise_for_status()
+                return response.content
+            elif src_url.startswith("data:"):
+                data = re.sub(r"^data:image/.+;base64,", "", src_url)
+                return base64.b64decode(data)
+
+            if src_url.startswith("file://"):
+                src_url = src_url[7:]
+
+            with open(src_url, "rb") as f:
+                return f.read()
+        except Exception as e:
+            _log.debug(f"Could not load image data: {e}")
+            return None
 
     @staticmethod
     def get_text(item: PageElement) -> str:
