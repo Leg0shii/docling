@@ -1,11 +1,11 @@
 {
   "schema_name": "DoclingDocument",
   "version": "1.5.0",
-  "name": "example_01",
+  "name": "example_02",
   "origin": {
     "mimetype": "text/html",
-    "binary_hash": 3245959421868226348,
-    "filename": "example_01.html"
+    "binary_hash": 17361433184833793580,
+    "filename": "example_02.html"
   },
   "furniture": {
     "self_ref": "#/furniture",
@@ -19,9 +19,6 @@
     "children": [
       {
         "$ref": "#/texts/0"
-      },
-      {
-        "$ref": "#/texts/4"
       }
     ],
     "content_layer": "body",
@@ -36,10 +33,10 @@
       },
       "children": [
         {
-          "$ref": "#/texts/5"
+          "$ref": "#/texts/4"
         },
         {
-          "$ref": "#/texts/6"
+          "$ref": "#/texts/5"
         }
       ],
       "content_layer": "body",
@@ -53,31 +50,14 @@
       },
       "children": [
         {
-          "$ref": "#/texts/7"
+          "$ref": "#/texts/6"
         },
         {
-          "$ref": "#/texts/8"
+          "$ref": "#/texts/7"
         }
       ],
       "content_layer": "body",
       "name": "ordered list",
-      "label": "list"
-    },
-    {
-      "self_ref": "#/groups/2",
-      "parent": {
-        "$ref": "#/texts/2"
-      },
-      "children": [
-        {
-          "$ref": "#/texts/9"
-        },
-        {
-          "$ref": "#/texts/10"
-        }
-      ],
-      "content_layer": "body",
-      "name": "ordered list start 42",
       "label": "list"
     }
   ],
@@ -123,16 +103,10 @@
           "$ref": "#/texts/3"
         },
         {
-          "$ref": "#/pictures/0"
-        },
-        {
           "$ref": "#/groups/0"
         },
         {
           "$ref": "#/groups/1"
-        },
-        {
-          "$ref": "#/groups/2"
         }
       ],
       "content_layer": "body",
@@ -157,18 +131,6 @@
     {
       "self_ref": "#/texts/4",
       "parent": {
-        "$ref": "#/body"
-      },
-      "children": [],
-      "content_layer": "body",
-      "label": "caption",
-      "prov": [],
-      "orig": "Example image",
-      "text": "Example image"
-    },
-    {
-      "self_ref": "#/texts/5",
-      "parent": {
         "$ref": "#/groups/0"
       },
       "children": [],
@@ -181,7 +143,7 @@
       "marker": ""
     },
     {
-      "self_ref": "#/texts/6",
+      "self_ref": "#/texts/5",
       "parent": {
         "$ref": "#/groups/0"
       },
@@ -195,7 +157,7 @@
       "marker": ""
     },
     {
-      "self_ref": "#/texts/7",
+      "self_ref": "#/texts/6",
       "parent": {
         "$ref": "#/groups/1"
       },
@@ -209,7 +171,7 @@
       "marker": ""
     },
     {
-      "self_ref": "#/texts/8",
+      "self_ref": "#/texts/7",
       "parent": {
         "$ref": "#/groups/1"
       },
@@ -221,56 +183,9 @@
       "text": "Second item in ordered list",
       "enumerated": true,
       "marker": ""
-    },
-    {
-      "self_ref": "#/texts/9",
-      "parent": {
-        "$ref": "#/groups/2"
-      },
-      "children": [],
-      "content_layer": "body",
-      "label": "list_item",
-      "prov": [],
-      "orig": "First item in ordered list with start",
-      "text": "First item in ordered list with start",
-      "enumerated": true,
-      "marker": "42."
-    },
-    {
-      "self_ref": "#/texts/10",
-      "parent": {
-        "$ref": "#/groups/2"
-      },
-      "children": [],
-      "content_layer": "body",
-      "label": "list_item",
-      "prov": [],
-      "orig": "Second item in ordered list with start",
-      "text": "Second item in ordered list with start",
-      "enumerated": true,
-      "marker": "43."
     }
   ],
-  "pictures": [
-    {
-      "self_ref": "#/pictures/0",
-      "parent": {
-        "$ref": "#/texts/2"
-      },
-      "children": [],
-      "content_layer": "body",
-      "label": "picture",
-      "prov": [],
-      "captions": [
-        {
-          "$ref": "#/texts/4"
-        }
-      ],
-      "references": [],
-      "footnotes": [],
-      "annotations": []
-    }
-  ],
+  "pictures": [],
   "tables": [],
   "key_value_items": [],
   "form_items": [],
