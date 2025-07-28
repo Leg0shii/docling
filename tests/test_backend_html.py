@@ -2,6 +2,7 @@ from io import BytesIO
 from pathlib import Path
 
 from docling.backend.html_backend import HTMLDocumentBackend
+from docling.datamodel.backend_options import HTMLBackendOptions
 from docling.datamodel.base_models import InputFormat
 from docling.datamodel.document import (
     ConversionResult,
@@ -9,7 +10,7 @@ from docling.datamodel.document import (
     InputDocument,
     SectionHeaderItem,
 )
-from docling.document_converter import DocumentConverter
+from docling.document_converter import DocumentConverter, HTMLFormatOption
 
 from .test_data_gen_flag import GEN_TEST_DATA
 from .verify_utils import verify_document, verify_export
@@ -20,13 +21,12 @@ GENERATE = GEN_TEST_DATA
 def test_heading_levels():
     in_path = Path("tests/data/html/wiki_duck.html")
     in_doc = InputDocument(
-        path_or_stream=in_path,
-        format=InputFormat.HTML,
-        backend=HTMLDocumentBackend,
+        path_or_stream=in_path, format=InputFormat.HTML, backend=HTMLDocumentBackend
     )
     backend = HTMLDocumentBackend(
         in_doc=in_doc,
         path_or_stream=in_path,
+        backend_options=HTMLBackendOptions(),
     )
     doc = backend.convert()
 
@@ -94,6 +94,7 @@ def test_ordered_lists():
         backend = HTMLDocumentBackend(
             in_doc=in_doc,
             path_or_stream=BytesIO(pair[0]),
+            backend_options=HTMLBackendOptions(),
         )
         doc: DoclingDocument = backend.convert()
         assert doc
@@ -109,7 +110,7 @@ def get_html_paths():
     return html_files
 
 
-def get_converter():
+def get_converter() -> DocumentConverter:
     converter = DocumentConverter(allowed_formats=[InputFormat.HTML])
 
     return converter

@@ -107,7 +107,6 @@ class InputDocument(BaseModel):
     source_url: Optional[str] = None
     document_hash: str  # = None
     valid: bool = True
-    backend_options: BackendOptions
     limits: DocumentLimits = DocumentLimits()
     format: InputFormat  # = None
 
@@ -115,26 +114,26 @@ class InputDocument(BaseModel):
     page_count: int = 0
 
     _backend: AbstractDocumentBackend  # Internal PDF backend used
+    _backend_options: BackendOptions = BackendOptions()
 
     def __init__(
         self,
         path_or_stream: Union[BytesIO, Path],
         format: InputFormat,
         backend: Type[AbstractDocumentBackend],
-        backend_options: BackendOptions,
+        backend_options: Optional[BackendOptions] = None,
         filename: Optional[str] = None,
         limits: Optional[DocumentLimits] = None,
     ) -> None:
         super().__init__(
-            file="",
-            document_hash="",
-            format=InputFormat.PDF,
-            backend_options=backend_options,
+            file="", document_hash="", format=InputFormat.PDF
         )  # initialize with dummy values
 
         self.limits = limits or DocumentLimits()
         self.format = format
-        self.backend_options = backend_options
+
+        if backend_options is None:
+            backend_options = self._backend_options
 
         if filename is not None and filename.startswith(("http://", "https://")):
             self.source_url = filename
@@ -158,7 +157,7 @@ class InputDocument(BaseModel):
                 self.valid = False
             else:
                 self.document_hash = create_file_hash(path_or_stream)
-                self._init_doc(backend, path_or_stream)
+                self._init_doc(backend, backend_options, path_or_stream)
 
             # For paginated backends, check if the maximum page count is exceeded.
             if self.valid and self._backend.is_valid():
@@ -188,13 +187,14 @@ class InputDocument(BaseModel):
     def _init_doc(
         self,
         backend: Type[AbstractDocumentBackend],
+        backend_options: BackendOptions,
         path_or_stream: Union[BytesIO, Path],
     ) -> None:
         if issubclass(backend, DeclarativeDocumentBackend):
             self._backend = backend(
                 self,
                 path_or_stream=path_or_stream,
-                backend_options=self.backend_options,
+                backend_options=backend_options,
             )
         else:
             self._backend = backend(self, path_or_stream=path_or_stream)
@@ -267,7 +267,7 @@ class _DocumentConversionInput(BaseModel):
                     f"Input document {obj.name} with format {format} does not match any allowed format: ({format_options.keys()})"
                 )
                 backend = _DummyBackend
-                backend_options = BackendOptions()
+                backend_options = None
             else:
                 backend = format_options[format].backend
                 backend_options = format_options[format].backend_options

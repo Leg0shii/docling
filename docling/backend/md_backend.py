@@ -543,18 +543,16 @@ class MarkdownDocumentBackend(DeclarativeDocumentBackend):
 
                 # delegate to HTML backend
                 stream = BytesIO(bytes(html_str, encoding="utf-8"))
-                backend_options = HTMLBackendOptions()
                 in_doc = InputDocument(
                     path_or_stream=stream,
                     format=InputFormat.HTML,
                     backend=html_backend_cls,
                     filename=self.file.name,
-                    backend_options=backend_options,
                 )
                 html_backend_obj = html_backend_cls(
                     in_doc=in_doc,
                     path_or_stream=stream,
-                    backend_options=backend_options,
+                    backend_options=HTMLBackendOptions(),
                 )
                 doc = html_backend_obj.convert()
         else:
