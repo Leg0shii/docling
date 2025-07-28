@@ -415,19 +415,14 @@ class HTMLDocumentBackend(DeclarativeDocumentBackend[HTMLBackendOptions]):
             self.level -= 1
 
     def _emit_image(self, img_tag: Tag, doc: DoclingDocument) -> None:
-        image_options = self.backend_options.image_options
-        if image_options == ImageOptions.NONE:
-            return
-
         parent = self.parents[self.level]
 
-        # Look for caption in figcaption first, then fall back to alt
-        caption = ""
         figure = img_tag.find_parent("figure")
+        caption = ""
         if isinstance(figure, Tag):
             caption_tag = figure.find("figcaption", recursive=False)
             if isinstance(caption_tag, Tag):
-                caption = caption_tag.get_text(strip=True)
+                caption = caption_tag.get_text()
 
         if not caption:
             caption = self._get_attr_as_string(img_tag, "alt").strip()
@@ -437,9 +432,17 @@ class HTMLDocumentBackend(DeclarativeDocumentBackend[HTMLBackendOptions]):
             caption_item = doc.add_text(
                 DocItemLabel.CAPTION,
                 caption,
+                content_layer=self.content_layer,
+            )
+
+        image_options = self.backend_options.image_options
+        if image_options == ImageOptions.NONE:
+            doc.add_picture(
+                caption=caption_item,
                 parent=parent,
                 content_layer=self.content_layer,
             )
+            return
 
         src_url = self._get_attr_as_string(img_tag, "src")
         if not src_url:

@@ -27,7 +27,7 @@ from docling.backend.msword_backend import MsWordDocumentBackend
 from docling.backend.noop_backend import NoOpBackend
 from docling.backend.xml.jats_backend import JatsDocumentBackend
 from docling.backend.xml.uspto_backend import PatentUsptoDocumentBackend
-from docling.datamodel.backend_options import BackendOptions, HTMLBackendOptions
+from docling.datamodel.backend_options import BackendOptions
 from docling.datamodel.base_models import (
     ConversionStatus,
     DoclingComponentType,
@@ -62,7 +62,7 @@ class FormatOption(BaseModel):
     pipeline_cls: Type[BasePipeline]
     pipeline_options: Optional[PipelineOptions] = None
     backend: Type[AbstractDocumentBackend]
-    backend_options: BackendOptions = Field(default_factory=BackendOptions)
+    backend_options: Optional[BackendOptions] = None
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -70,6 +70,9 @@ class FormatOption(BaseModel):
     def set_optional_field_default(self) -> "FormatOption":
         if self.pipeline_options is None:
             self.pipeline_options = self.pipeline_cls.get_default_options()
+
+        if self.backend_options is None:
+            self.backend_options = self.backend.get_default_options()
 
         return self
 
