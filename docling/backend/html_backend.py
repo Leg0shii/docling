@@ -1,8 +1,6 @@
 import base64
 import logging
 import re
-import traceback
-from email.mime import image
 from io import BytesIO
 from pathlib import Path
 from typing import Final, Optional, Union, cast
@@ -165,11 +163,7 @@ class HTMLDocumentBackend(DeclarativeDocumentBackend[HTMLBackendOptions]):
         )
         # reset context
         self.ctx = _Context()
-
-        try:
-            self._walk(content, doc)
-        except Exception:
-            print(traceback.format_exc())
+        self._walk(content, doc)
 
         return doc
 

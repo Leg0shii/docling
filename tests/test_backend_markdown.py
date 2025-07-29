@@ -17,13 +17,17 @@ def test_convert_valid():
     relevant_paths = sorted((root_path / "md").rglob("*.md"))
     assert len(relevant_paths) > 0
 
-    yaml_filter = ["inline_and_formatting"]
+    yaml_filter = ["inline_and_formatting", "mixed_without_h1"]
 
     for in_path in relevant_paths:
         md_gt_path = root_path / "groundtruth" / "docling_v2" / f"{in_path.name}.md"
         yaml_gt_path = root_path / "groundtruth" / "docling_v2" / f"{in_path.name}.yaml"
 
-        in_doc = InputDocument(path_or_stream=in_path, format=fmt, backend=cls)
+        in_doc = InputDocument(
+            path_or_stream=in_path,
+            format=fmt,
+            backend=cls,
+        )
         backend = cls(
             in_doc=in_doc, path_or_stream=in_path, backend_options=BackendOptions()
         )
@@ -37,12 +41,11 @@ def test_convert_valid():
                 f.write(f"{act_data}\n")
 
             if in_path.stem in yaml_filter:
-                with open(yaml_gt_path, mode="w", encoding="utf-8") as f:
-                    act_doc.save_as_yaml(
-                        yaml_gt_path,
-                        coord_precision=COORD_PREC,
-                        confid_precision=CONFID_PREC,
-                    )
+                act_doc.save_as_yaml(
+                    yaml_gt_path,
+                    coord_precision=COORD_PREC,
+                    confid_precision=CONFID_PREC,
+                )
         else:
             with open(md_gt_path, encoding="utf-8") as f:
                 exp_data = f.read().rstrip()
@@ -50,4 +53,4 @@ def test_convert_valid():
 
             if in_path.stem in yaml_filter:
                 exp_doc = DoclingDocument.load_from_yaml(yaml_gt_path)
-                assert act_doc == exp_doc
+                assert act_doc == exp_doc, f"export to yaml failed on {in_path}"

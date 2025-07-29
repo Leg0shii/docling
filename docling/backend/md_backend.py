@@ -5,7 +5,7 @@ from copy import deepcopy
 from enum import Enum
 from io import BytesIO
 from pathlib import Path
-from typing import List, Literal, Optional, Set, Union
+from typing import Literal, Optional, Union, cast
 
 import marko
 import marko.element
@@ -14,6 +14,7 @@ from docling_core.types.doc import (
     DocItemLabel,
     DoclingDocument,
     DocumentOrigin,
+    ListItem,
     NodeItem,
     TableCell,
     TableData,
@@ -95,7 +96,7 @@ class MarkdownDocumentBackend(DeclarativeDocumentBackend):
     ):
         super().__init__(in_doc, path_or_stream, backend_options=backend_options)
 
-        _log.debug("MD INIT!!!")
+        _log.debug("Starting MarkdownDocumentBackend...")
 
         # Markdown file:
         self.path_or_stream = path_or_stream
@@ -137,7 +138,7 @@ class MarkdownDocumentBackend(DeclarativeDocumentBackend):
             for md_table_row in self.md_table_buffer:
                 _log.debug(md_table_row)
             _log.debug("=== TABLE END ===")
-            tcells: List[TableCell] = []
+            tcells: list[TableCell] = []
             result_table = []
             for n, md_table_row in enumerate(self.md_table_buffer):
                 data = []
@@ -238,11 +239,12 @@ class MarkdownDocumentBackend(DeclarativeDocumentBackend):
         element: marko.element.Element,
         depth: int,
         doc: DoclingDocument,
-        visited: Set[marko.element.Element],
+        visited: set[marko.element.Element],
         creation_stack: list[
             _CreationPayload
         ],  # stack for lazy item creation triggered deep in marko's AST (on RawText)
         list_ordered_flag_by_ref: dict[str, bool],
+        list_last_item_by_ref: dict[str, ListItem],
         parent_item: Optional[NodeItem] = None,
         formatting: Optional[Formatting] = None,
         hyperlink: Optional[Union[AnyUrl, Path]] = None,
@@ -285,7 +287,7 @@ class MarkdownDocumentBackend(DeclarativeDocumentBackend):
 
         elif (
             isinstance(element, marko.block.ListItem)
-            and len(element.children) == 1
+            and len(element.children) > 0
             and isinstance((child := element.children[0]), marko.block.Paragraph)
             and len(child.children) > 0
         ):
@@ -297,7 +299,15 @@ class MarkdownDocumentBackend(DeclarativeDocumentBackend):
                 if parent_item
                 else False
             )
-            if len(child.children) > 1:  # inline group will be created further down
+            non_list_children: list[marko.element.Element] = [
+                item
+                for item in child.children
+                if not isinstance(item, marko.block.ListItem)
+            ]
+            if len(non_list_children) > 1:  # inline group will be created further down
+                parent_ref: Optional[str] = (
+                    parent_item.self_ref if parent_item else None
+                )
                 parent_item = self._create_list_item(
                     doc=doc,
                     parent_item=parent_item,
@@ -306,6 +316,8 @@ class MarkdownDocumentBackend(DeclarativeDocumentBackend):
                     formatting=formatting,
                     hyperlink=hyperlink,
                 )
+                if parent_ref:
+                    list_last_item_by_ref[parent_ref] = cast(ListItem, parent_item)
             else:
                 creation_stack.append(_ListItemCreationPayload(enumerated=enumerated))
 
@@ -340,9 +352,11 @@ class MarkdownDocumentBackend(DeclarativeDocumentBackend):
                 element.dest
             )
 
-        elif isinstance(element, marko.inline.RawText):
-            _log.debug(f" - Paragraph (raw text): {element.children}")
-            snippet_text = element.children.strip()
+        elif isinstance(element, (marko.inline.RawText, marko.inline.Literal)):
+            _log.debug(f" - RawText/Literal: {element.children}")
+            snippet_text = (
+                element.children.strip() if isinstance(element.children, str) else ""
+            )
             # Detect start of the table:
             if "|" in snippet_text or self.in_table:
                 # most likely part of the markdown table
@@ -365,6 +379,7 @@ class MarkdownDocumentBackend(DeclarativeDocumentBackend):
                                 if parent_item
                                 else False
                             )
+                            parent_ref = parent_item.self_ref if parent_item else None
                             parent_item = self._create_list_item(
                                 doc=doc,
                                 parent_item=parent_item,
@@ -373,6 +388,11 @@ class MarkdownDocumentBackend(DeclarativeDocumentBackend):
                                 formatting=formatting,
                                 hyperlink=hyperlink,
                             )
+                            if parent_ref:
+                                list_last_item_by_ref[parent_ref] = cast(
+                                    ListItem, parent_item
+                                )
+
                         elif isinstance(to_create, _HeadingCreationPayload):
                             # not keeping as parent_item as logic for correctly tracking
                             # that not implemented yet (section components not captured
@@ -464,6 +484,17 @@ class MarkdownDocumentBackend(DeclarativeDocumentBackend):
             element, processed_block_types
         ):
             for child in element.children:
+                if (
+                    isinstance(element, marko.block.ListItem)
+                    and isinstance(child, marko.block.List)
+                    and parent_item
+                    and list_last_item_by_ref.get(parent_item.self_ref, None)
+                ):
+                    _log.debug(
+                        f"walking into new List hanging from item of parent list {parent_item.self_ref}"
+                    )
+                    parent_item = list_last_item_by_ref[parent_item.self_ref]
+
                 self._iterate_elements(
                     element=child,
                     depth=depth + 1,
@@ -471,6 +502,7 @@ class MarkdownDocumentBackend(DeclarativeDocumentBackend):
                     visited=visited,
                     creation_stack=creation_stack,
                     list_ordered_flag_by_ref=list_ordered_flag_by_ref,
+                    list_last_item_by_ref=list_last_item_by_ref,
                     parent_item=parent_item,
                     formatting=formatting,
                     hyperlink=hyperlink,
@@ -489,7 +521,7 @@ class MarkdownDocumentBackend(DeclarativeDocumentBackend):
         return False
 
     @classmethod
-    def supported_formats(cls) -> Set[InputFormat]:
+    def supported_formats(cls) -> set[InputFormat]:
         return {InputFormat.MD}
 
     def convert(self) -> DoclingDocument:
@@ -516,6 +548,7 @@ class MarkdownDocumentBackend(DeclarativeDocumentBackend):
                 visited=set(),
                 creation_stack=[],
                 list_ordered_flag_by_ref={},
+                list_last_item_by_ref={},
             )
             self._close_table(doc=doc)  # handle any last hanging table
 
@@ -540,7 +573,6 @@ class MarkdownDocumentBackend(DeclarativeDocumentBackend):
                 ]:
                     html_str = _restore_original_html(txt=html_str, regex=regex)
                 self._html_blocks = 0
-
                 # delegate to HTML backend
                 stream = BytesIO(bytes(html_str, encoding="utf-8"))
                 in_doc = InputDocument(
